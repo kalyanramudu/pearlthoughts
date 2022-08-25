@@ -1,0 +1,227 @@
+provider "aws" {
+  region     = "us-east-1c"
+  access_key = "AKIA5SQ56Z6YWFBQG6NQ "
+  secret_key = "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"
+}
+
+resource "aws_vpc" "vpc" {
+  cidr_block       = "192.168.0.0/16"
+  instance_tenancy = "default"
+
+  tags = {
+    Name = "kalyanvpc"
+  }
+}
+
+resource "aws_subnet" "pub" {
+  vpc_id     = aws_vpc.vpc.id
+  cidr_block = "192.168.1.0/24"
+
+  tags = {
+    Name = "public"
+  }
+}
+
+resource "aws_subnet" "pri" {
+  vpc_id     = aws_vpc.vpc.id
+  cidr_block = "192.168.3.0/24"
+
+  tags = {
+    Name = "private"
+  }
+}
+
+resource "aws_internet_gateway" "igw" {
+  vpc_id = aws_vpc.vpc.id
+
+  tags = {
+    Name = "IGW"
+  }
+}
+
+resource "aws_eip" "ip" {
+  
+  vpc      = true
+}
+
+resource "aws_nat_gateway" "ngw" {
+  allocation_id = "${aws_eip.ip.id}"
+  subnet_id     = "${aws_subnet.pri.id}"
+
+  tags = {
+    Name = "NGW"
+  }
+}
+
+resource "aws_route_table" "rt1" {
+  vpc_id = aws_vpc.vpc.id
+
+  route {
+    cidr_block = "0.0.0.0/0"
+    gateway_id = aws_internet_gateway.igw.id
+  }
+tags = {
+    Name = "custom"
+  }
+}
+
+resource "aws_route_table" "rt2" {
+  vpc_id = aws_vpc.vpc.id
+
+  route {
+    cidr_block = "0.0.0.0/0"
+    gateway_id = aws_nat_gateway.ngw.id
+  }
+tags = {
+    Name = "main"
+  }
+}
+
+resource "aws_route_table_association" "as_1" {
+  subnet_id      = aws_subnet.pub.id
+  route_table_id = aws_route_table.rt1.id
+}
+resource "aws_route_table_association" "as_2" {
+  subnet_id      = aws_subnet.pri.id
+  route_table_id = aws_route_table.rt2.id
+}
+
+resource "aws_security_group" "SG" {
+  name        = "firstSG"
+  description = "Allow TLS inbound traffic"
+  vpc_id      = aws_vpc.vpc.id
+
+  ingress {
+    description      = "TLS from VPC"
+    from_port        = 22
+    to_port          = 22
+    protocol         = "tcp"
+    cidr_blocks      = [aws_vpc.vpc.cidr_block]
+   
+  }
+
+  egress {
+    from_port        = 0
+    to_port          = 0
+    protocol         = "-1"
+    cidr_blocks      = ["0.0.0.0/0"]
+    
+  }
+
+  tags = {
+    Name = "firstSG"
+  }
+}
+
+resource "aws_instance" "frontendangulaec2" {
+  ami           = "ami-2757f631"
+  instance_type = "t2.micro"
+  security_group = "sg-0a022b21e069f58f7"
+  key_name = "2022"
+}
+tags = {
+  Name = "frontendangulaec2"
+}
+
+count = 1
+subnet_id      = "aws_subnet.pub.id"
+
+
+
+resource "aws_instance" "backtendangulaec2" {
+  vpc_id      = aws_vpc.vpc.id
+  subnet_id      = "aws_subnet.pri.id"
+  ami           = "ami-2757f631"
+  instance_type = "t2.micro"
+  security_group = "sg-0a022b21e069f58f7"
+  key_name = "2022"
+}
+tags = {
+  Name = "backendangulaec2"
+}
+locals {
+  s3_origin_id = "s3-origin"
+}
+
+
+resource "aws_s3_bucket" "amazons3" {
+  bucket = "amazons3"
+  acl    = "public-read-write"
+
+  tags = {
+    Name        = "amazons3"
+    Environment = "pod"
+  }
+}
+
+provisioner "local-exec"{
+  command = "git clone https://github.com/kalyanramudu/pearl.git"
+}
+resource "aws_s3_bucket_public_access_block" "amazons3" {
+  bucket = aws_s3_bucket.amazons3.id
+
+  block_public_acls       = false
+  block_public_policy     = false
+
+}
+resource "aws_s3_bucket_object" "object1" {
+  depands_on = ["aws_s3_bucket" "amazons3"]
+  bucket = "amazons3"
+  key    = "new_object_key"
+  acl    = "public-read-write"
+  source = "pearl/pearlthoughts"
+  
+  }
+
+  resource "aws_cloudfront_distribution" "s3_distribution" {
+  depands_on = [ aws_s3_bucket_object.object1 ]
+  origin {
+    domain_name = aws_s3_bucket.amazons3.bucket_regional_domain_name
+    origin_id   = local.s3_origin_id
+   
+   }
+
+    default_cache_behavior {
+    allowed_methods  = ["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"]
+    cached_methods   = ["GET", "HEAD"]
+    target_origin_id = local.s3_origin_id
+
+    forwarded_values {
+      query_string = false
+
+      cookies {
+        forward = "none"
+      }
+    }
+
+     viewer_protocol_policy = "allow-all"
+    min_ttl                = 0
+    default_ttl            = 3600
+    max_ttl                = 86400
+  }
+   restrictions {
+    geo_restriction {
+      restriction_type = "none"
+  }
+
+  viewer_certificate {
+    cloudfront_default_certificate = true
+
+  }
+
+} 
+
+
+
+
+
+
+  
+
+
+
+
+
+
+
+
